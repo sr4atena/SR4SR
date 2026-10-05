@@ -1,13 +1,13 @@
 [Unit]
 Description=Manor Ledger: read YouTube, summarise it, publish to the server
-Documentation=file:///home/sr/SR4Atena/docs/PLAN-voices.md
+Documentation=file:///home/sr/SR4SR/docs/PLAN-voices.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/SR4Atena
-Environment=MANOR_DATA_DIR=%h/SR4Atena/data
+WorkingDirectory=%h/SR4SR
+Environment=MANOR_DATA_DIR=%h/SR4SR/data
 
 # This job deliberately runs here and not on the server: YouTube refuses
 # caption requests from datacenter addresses, so the extraction has to happen

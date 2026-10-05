@@ -1,6 +1,6 @@
 # Manor Ledger
 
-[![CI](https://github.com/sr4atena/SR4Atena/actions/workflows/ci.yml/badge.svg)](https://github.com/sr4atena/SR4Atena/actions/workflows/ci.yml)
+[![CI](https://github.com/sr4atena/SR4SR/actions/workflows/ci.yml/badge.svg)](https://github.com/sr4atena/SR4SR/actions/workflows/ci.yml)
 ![PHP 8.2+](https://img.shields.io/badge/PHP-8.2%2B-777bb4)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
@@ -173,7 +173,7 @@ Requirements: PHP 8.2+ with `curl`, `json`, `mbstring`, `zlib`. Docker is
 used only for tests when the host PHP is older.
 
 ```bash
-git clone https://github.com/sr4atena/SR4Atena.git manor-ledger && cd manor-ledger
+git clone https://github.com/sr4atena/SR4SR.git manor-ledger && cd manor-ledger
 
 # 1. a user (password is prompted, never passed on the command line)
 php bin/user add me --role=owner
