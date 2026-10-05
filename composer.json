@@ -1,5 +1,5 @@
 {
-    "name": "sr4atena/manor-ledger",
+    "name": "sr4sr/manor-ledger",
     "description": "Roblox analytics dashboard for The Locust's Manor: daily ingestion, incremental history, economics and diagnostics.",
     "type": "project",
     "license": "MIT",
