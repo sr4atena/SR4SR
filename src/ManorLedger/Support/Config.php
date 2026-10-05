@@ -30,6 +30,12 @@ final class Config
         return new self($values);
     }
 
+    /** @return array<string, mixed> the whole tree, for code that takes the plain array */
+    public function all(): array
+    {
+        return $this->values;
+    }
+
     public function has(string $key): bool
     {
         return $this->lookup($key) !== null;

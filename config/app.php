@@ -15,11 +15,57 @@ $dataDir = rtrim((string)$env('MANOR_DATA_DIR', $root . '/data'), '/');
 // and the pool may only read it, so the pool needs somewhere of its own.
 $stateDir = rtrim((string)$env('MANOR_STATE_DIR', $dataDir), '/');
 
+// The games this installation follows, keyed by slug (the slug is what the
+// web selector and `bin/refresh --game=` take). The first is the original one
+// and keeps the original layout, so production data never had to move; every
+// game added later lives under <data>/games/<slug>/. Per-game paths are listed
+// in full: a game never inherits another game's file (Support\Games).
+$gameDir = static fn (string $slug): string => $dataDir . '/games/' . $slug;
+$games = [
+    'locust' => [
+        'name'         => 'The Locust\'s Manor',
+        'universeId'   => (int)$env('MANOR_UNIVERSE_ID', 10674300622),
+        'royaltyShare' => 0.17,    // revenue share withheld before the developer's net
+        'voices'       => true,    // AI Sentiment view (YouTube)
+        'ads'          => true,    // Ads view (campaign spend from bin/ads-import)
+        'paths' => [
+            'data'        => $dataDir,
+            'cache'       => $dataDir . '/cache',
+            'snapshots'   => $dataDir . '/snapshots',
+            'history'     => $dataDir . '/history.json',
+            'dashboard'   => $dataDir . '/dashboard.json',
+            'ads'         => $dataDir . '/ads.json',
+            'apiKey'      => (string)$env('MANOR_API_KEY_FILE', $dataDir . '/api-key'),
+            'voices'      => $dataDir . '/voices.json',
+            'voicesMedia' => $dataDir . '/media/yt',
+        ],
+    ],
+    'colorblind' => [
+        'name'         => 'COLORBLIND',
+        'universeId'   => (int)$env('MANOR_UNIVERSE_ID_COLORBLIND', 10766214469),
+        'royaltyShare' => 0.0,     // not a licensed game: no royalty withheld
+        'voices'       => false,
+        'ads'          => false,
+        'paths' => [
+            'data'      => $gameDir('colorblind'),
+            'cache'     => $gameDir('colorblind') . '/cache',
+            'snapshots' => $gameDir('colorblind') . '/snapshots',
+            'history'   => $gameDir('colorblind') . '/history.json',
+            'dashboard' => $gameDir('colorblind') . '/dashboard.json',
+            'apiKey'    => (string)$env('MANOR_API_KEY_FILE_COLORBLIND', $gameDir('colorblind') . '/api-key'),
+        ],
+    ],
+];
+$defaultGame = 'locust';
+
 return [
     'app' => [
         'name'      => 'Manor Ledger',
-        'game'      => 'The Locust\'s Manor',
-        'universeId'=> (int)$env('MANOR_UNIVERSE_ID', 10674300622),
+        // The default game; `game` and `universeId` are aliases of its entry
+        // below, kept for the code that predates the games map.
+        'defaultGame' => $defaultGame,
+        'game'      => $games[$defaultGame]['name'],
+        'universeId'=> $games[$defaultGame]['universeId'],
         'host'      => (string)$env('MANOR_HOST', 'localhost'),   // expected Host header (CSRF origin check)
         'timezone'  => 'Europe/Rome',
         'debug'     => (bool)$env('MANOR_DEBUG', 0),
@@ -38,7 +84,7 @@ return [
         'throttle'   => $stateDir . '/throttle',
         'sessions'   => $stateDir . '/sessions',
         'authLog'    => $stateDir . '/auth.log',
-        'apiKey'     => (string)$env('MANOR_API_KEY_FILE', $dataDir . '/api-key'),
+        'apiKey'     => $games[$defaultGame]['paths']['apiKey'],
         // Voci (YouTube): computed on the workstation, published to the VPS.
         'voices'          => $dataDir . '/voices.json',
         'voicesCache'     => $dataDir . '/voices-cache',
@@ -52,8 +98,12 @@ return [
         'dimensions' => $root . '/config/dimensions.json',
         'glossary'   => $root . '/config/glossary.json',
     ],
+    'games' => $games,
     'roblox' => [
         'baseUrl'     => 'https://apis.roblox.com/analytics-query-api/',
+        // One window file for every game: the quota belongs to the owner, and
+        // a game run with its own counter would spend a window already used.
+        'budgetFile'  => $dataDir . '/cache/.budget.json',
         // Measured: 30 requests per calendar minute, shared by every key of the owner.
         'windowLimit' => 18,   // fallback until an x-ratelimit header is seen
         'windowSecs'  => 60,
@@ -66,7 +116,7 @@ return [
     ],
     'economics' => [
         'devexUsdPerRobux' => 0.0038,  // Roblox DevEx rate
-        'royaltyShare'     => 0.17,    // revenue share withheld before the developer's net
+        'royaltyShare'     => $games[$defaultGame]['royaltyShare'],  // per game: see `games`
         'multiples'        => ['conservative' => 18, 'base' => 30],
         'plateauShares'    => [0.06, 0.10, 0.15],
     ],

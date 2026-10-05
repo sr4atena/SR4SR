@@ -29,7 +29,8 @@ export function initRouter(views, render) {
       tab.setAttribute('aria-selected', String(active));
       tab.tabIndex = active ? 0 : -1;
     });
-    document.title = `${views[name].title} · Manor Ledger`;
+    const game = document.body.dataset.game;
+    document.title = [views[name].title, game, 'Manor Ledger'].filter(Boolean).join(' · ');
     render(name, views[name]);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }

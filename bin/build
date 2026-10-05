@@ -3,10 +3,15 @@
 /**
  * Builds data/dashboard.json from data/history.json.
  *
- *   bin/build            write the file, print a one-line summary
- *   bin/build --print    also dump the JSON to stdout
+ *   bin/build                    write the file, print a one-line summary (default game)
+ *   bin/build --game=colorblind  one game, by its slug in config/app.php `games`
+ *   bin/build --all              every game in turn, the default first
+ *   bin/build --print            also dump the JSON to stdout
  *
- * Exit 2 when the history is missing: there is nothing to build yet.
+ * Exit 2 when the history is missing: there is nothing to build yet. With
+ * --all a game that fails does not stop the others; the exit code is then
+ * 1 (2 when every failure was a missing history), and stderr names the games.
+ * An unknown game is a usage error, exit 2.
  */
 declare(strict_types=1);
 
@@ -15,51 +20,93 @@ require dirname(__DIR__) . '/src/autoload.php';
 use ManorLedger\Analytics\DashboardBuilder;
 use ManorLedger\Storage\History;
 use ManorLedger\Storage\JsonStore;
+use ManorLedger\Support\GameOption;
+use ManorLedger\Support\Games;
 
 $config  = require dirname(__DIR__) . '/config/app.php';
-$print   = in_array('--print', array_slice($argv, 1), true);
-$paths   = $config['paths'];
+try {
+    $games  = new Games($config);
+    $option = GameOption::parse(array_slice($argv, 1), $games);
+} catch (InvalidArgumentException $e) {
+    fwrite(STDERR, $e->getMessage() . "\nUsage: bin/build [--game=SLUG | --all] [--print]\n");
+    exit(2);
+}
+$print   = in_array('--print', $option['rest'], true);
+$several = count($option['games']) > 1;
 
 $catalogById = [];
-$catalogDoc  = json_decode((string)file_get_contents($paths['metrics']), true);
+$catalogDoc  = json_decode((string)file_get_contents($config['paths']['metrics']), true);
 foreach ($catalogDoc['metrics'] ?? [] as $entry) {
     if (isset($entry['id'])) {
         $catalogById[$entry['id']] = $entry;
     }
 }
-$glossary = json_decode((string)file_get_contents($paths['glossary']), true) ?: [];
+$glossary = json_decode((string)file_get_contents($config['paths']['glossary']), true) ?: [];
 
-$history = new History($paths['history'], static fn (string $id): string => $catalogById[$id]['format'] ?? 'dec');
-if (!$history->exists()) {
-    fwrite(STDERR, "history missing: {$paths['history']} (run bin/refresh or bin/import-legacy first)\n");
-    exit(2);
+/** One game; the exit code it would have had on its own. */
+$buildGame = static function (string $slug) use ($games, $catalogById, $glossary, $print, $several): int {
+    $prefix = $several ? "[$slug] " : '';
+    $gameConfig = $games->configFor($slug);
+    $paths = $gameConfig['paths'];
+
+    $history = new History($paths['history'], static fn (string $id): string => $catalogById[$id]['format'] ?? 'dec');
+    if (!$history->exists()) {
+        fwrite(STDERR, "{$prefix}history missing: {$paths['history']} (run bin/refresh or bin/import-legacy first)\n");
+        return 2;
+    }
+
+    // The fetch time decides which revenue day is still provisional. Prefer the
+    // time recorded in the history, then the raw cache, then the history file itself.
+    $cache     = new JsonStore($paths['cache'] . '/metrics.json');
+    $fetchedAt = $history->fetchedAt() ?? ($cache->read()['fetchedAt'] ?? null) ?? (new JsonStore($paths['history']))->mtime() ?? time();
+
+    // Optional: the dashboard is complete without it, only the Ads view loses
+    // its costs. A game without the Ads view has no ledger path at all.
+    $adsLedger = $paths['ads'] === null ? null : (new JsonStore($paths['ads']))->read();
+
+    $dashboard = (new DashboardBuilder($gameConfig, $catalogById, $glossary, $adsLedger))->build($history, (int)$fetchedAt);
+    // 0640: the php-fpm pool runs as a different user and must read this file,
+    // while the group keeps it away from everyone else on the host.
+    $store = new JsonStore($paths['dashboard'], 0640);
+    $store->write($dashboard);
+
+    if ($print) {
+        echo json_encode($dashboard, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT), "\n";
+    }
+    printf(
+        "%s%s: %d KB, dataThrough %s, provisional %s, %d metrics, %d dimension pairs, %d anomalies, ads %s\n",
+        $prefix,
+        $paths['dashboard'],
+        (int)round(filesize($paths['dashboard']) / 1024),
+        $dashboard['dataThrough'] ?? 'n/a',
+        $dashboard['provisionalDate'] ?? 'none',
+        count($dashboard['metrics']),
+        count($dashboard['dimensions']),
+        count($dashboard['anomalies']),
+        $dashboard['ads'] === [] ? 'n/d' : sprintf('%d campagne', count($dashboard['ads']['campaigns'])),
+    );
+    return 0;
+};
+
+// One game's failure (no history yet, a crash) must not leave the others unbuilt.
+$failed = [];
+$codes  = [];
+foreach ($option['games'] as $slug) {
+    try {
+        $code = $buildGame($slug);
+    } catch (Throwable $e) {
+        if (!$several) {
+            throw $e;
+        }
+        fwrite(STDERR, "[$slug] ERROR: " . $e->getMessage() . "\n");
+        $code = 1;
+    }
+    if ($code !== 0) {
+        $failed[] = $slug;
+        $codes[]  = $code;
+    }
 }
-
-// The fetch time decides which revenue day is still provisional. Prefer the
-// time recorded in the history, then the raw cache, then the history file itself.
-$cache     = new JsonStore($paths['cache'] . '/metrics.json');
-$fetchedAt = $history->fetchedAt() ?? ($cache->read()['fetchedAt'] ?? null) ?? (new JsonStore($paths['history']))->mtime() ?? time();
-
-// Optional: the dashboard is complete without it, only the Ads view loses its costs.
-$adsLedger = (new JsonStore($paths['ads']))->read();
-
-$dashboard = (new DashboardBuilder($config, $catalogById, $glossary, $adsLedger))->build($history, (int)$fetchedAt);
-// 0640: the php-fpm pool runs as a different user and must read this file,
-// while the group keeps it away from everyone else on the host.
-$store = new JsonStore($paths['dashboard'], 0640);
-$store->write($dashboard);
-
-if ($print) {
-    echo json_encode($dashboard, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT), "\n";
+if ($several && $failed !== []) {
+    fwrite(STDERR, 'Build failed for: ' . implode(', ', $failed) . "\n");
 }
-printf(
-    "%s: %d KB, dataThrough %s, provisional %s, %d metrics, %d dimension pairs, %d anomalies, ads %s\n",
-    $paths['dashboard'],
-    (int)round(filesize($paths['dashboard']) / 1024),
-    $dashboard['dataThrough'] ?? 'n/a',
-    $dashboard['provisionalDate'] ?? 'none',
-    count($dashboard['metrics']),
-    count($dashboard['dimensions']),
-    count($dashboard['anomalies']),
-    $dashboard['ads'] === [] ? 'n/d' : sprintf('%d campagne', count($dashboard['ads']['campaigns'])),
-);
+exit($failed === [] ? 0 : (array_unique($codes) === [2] ? 2 : 1));

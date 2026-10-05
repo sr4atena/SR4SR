@@ -8,12 +8,18 @@
  * @var string $csrfToken
  * @var string $appName
  * @var string $gameName
+ * @var string $gameSlug
+ * @var array<string, string> $games  slug => name, every configured game
+ * @var list<string> $viewsOff        views the selected game lacks
  * @var string $assetVersion
  */
 declare(strict_types=1);
 
 /** @var callable(string):string $asset */
 $initial = mb_strtoupper(mb_substr($user['username'], 0, 1));
+$games = $games ?? [];
+$viewsOff = $viewsOff ?? [];
+$on = static fn (string $view): bool => !in_array($view, $viewsOff, true);
 ?>
 <!DOCTYPE html>
 <html lang="it">
@@ -22,11 +28,11 @@ $initial = mb_strtoupper(mb_substr($user['username'], 0, 1));
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="referrer" content="same-origin">
-<title><?= e($appName) ?></title>
+<title><?= e($gameName) ?> · <?= e($appName) ?></title>
 <link rel="icon" type="image/svg+xml" href="<?= e($asset('img/favicon.svg')) ?>">
 <link rel="stylesheet" href="<?= e($asset('css/app.css')) ?>">
 </head>
-<body>
+<body data-game="<?= e($gameName) ?>" data-views-off="<?= e(implode(' ', $viewsOff)) ?>">
 <a class="skip" href="#main">Vai al contenuto</a>
 
 <header class="topbar">
@@ -44,6 +50,13 @@ $initial = mb_strtoupper(mb_substr($user['username'], 0, 1));
     </span>
   </a>
   <div class="topbar-right">
+<?php if (count($games) > 1): ?>
+    <nav class="game-switch" aria-label="Gioco">
+<?php foreach ($games as $slug => $name): ?>
+      <a href="/?game=<?= e(rawurlencode($slug)) ?>"<?= $slug === $gameSlug ? ' aria-current="page"' : '' ?>><?= e($name) ?></a>
+<?php endforeach ?>
+    </nav>
+<?php endif ?>
     <span id="freshness" class="chip-fresh" aria-live="polite">dati in caricamento</span>
     <button id="glossary-button" class="btn-ghost" type="button" aria-controls="glossary" aria-haspopup="dialog">Glossario</button>
     <div class="user">
@@ -67,8 +80,12 @@ $initial = mb_strtoupper(mb_substr($user['username'], 0, 1));
     <a class="tab" role="tab" href="#crescita" data-view-link="crescita" aria-selected="false">Crescita</a>
     <a class="tab" role="tab" href="#monetizzazione" data-view-link="monetizzazione" aria-selected="false"><span class="tab-long">Monetizzazione</span><span class="tab-short">Monetiz.</span></a>
     <a class="tab" role="tab" href="#salute" data-view-link="salute" aria-selected="false">Salute</a>
+<?php if ($on('ads')): ?>
     <a class="tab" role="tab" href="#ads" data-view-link="ads" aria-selected="false"><span class="tab-long">Analisi Ads</span><span class="tab-short">Ads</span></a>
+<?php endif ?>
+<?php if ($on('ai-sentiment')): ?>
     <a class="tab" role="tab" href="#ai-sentiment" data-view-link="ai-sentiment" aria-selected="false"><span class="tab-long">AI Sentiment</span><span class="tab-short">Sentiment</span></a>
+<?php endif ?>
   </nav>
   <div class="segmented" role="group" aria-label="Periodo dei grafici">
     <button type="button" data-period="7g" aria-pressed="false">7g</button>

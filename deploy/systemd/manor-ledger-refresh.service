@@ -10,15 +10,31 @@ SupplementaryGroups=manor
 WorkingDirectory=/opt/manor-ledger
 Environment=MANOR_DATA_DIR=/var/lib/manor-ledger
 Environment=MANOR_API_KEY_FILE=/etc/manor-ledger/api-key
+# One key file per game (deploy/install.sh --api-key FILE --game SLUG).
+Environment=MANOR_API_KEY_FILE_COLORBLIND=/etc/manor-ledger/api-key-colorblind
 UMask=0027
 Environment=MANOR_HOST=manor.handgivers.it
 # --if-older-than lets the same unit serve as a retry: a second timer fires at
 # noon and is a no-op when the morning run succeeded.
 # MemoryDenyWriteExecute below blocks PCRE's JIT, which PHP would warn about
 # on every run. Disabling the JIT explicitly keeps the sandbox and the logs clean.
-ExecStart=/usr/bin/php -d pcre.jit=0 /opt/manor-ledger/bin/refresh --if-older-than=8
-ExecStart=/usr/bin/php -d pcre.jit=0 /opt/manor-ledger/bin/build
-TimeoutStartSec=20min
+#
+# Every game, in turn, the default first (--all). With two plain ExecStart=
+# lines a non-zero refresh skips the build, and with --all that would let a
+# COLORBLIND failure leave the Locust dashboard unbuilt. The leading "-" lets
+# the build always run: bin/build --all rebuilds each game from the history it
+# has, which after a failed refresh is the previous one, or today's minus the
+# failed rows (exactly what the noon run, finding the cache fresh, used to
+# publish anyway). The provisional day and the freshness chip come from the
+# history's own fetch time, so an old history is never shown as new.
+# The price: a refresh failure alone no longer marks the unit failed. The
+# journal still names it ("[slug] ERROR ...", "Refresh failed for: slug"),
+# and a game with no history at all still fails the build, hence the unit.
+ExecStart=-/usr/bin/php -d pcre.jit=0 /opt/manor-ledger/bin/refresh --all --if-older-than=8
+ExecStart=/usr/bin/php -d pcre.jit=0 /opt/manor-ledger/bin/build --all
+# Each game's refresh has a 10-minute API deadline (config roblox.deadline):
+# room for both, so a slow second game cannot time out the whole unit.
+TimeoutStartSec=45min
 Nice=10
 
 # Sandbox: this job needs the network, its data dir and the key file, nothing else.

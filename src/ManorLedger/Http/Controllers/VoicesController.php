@@ -8,12 +8,16 @@
  * Cloudflare must never keep a copy. The video id is the only variable path
  * segment in the whole application; it is matched against a strict pattern and
  * never concatenated into a path before that check passes.
+ *
+ * The view belongs to the session's game: a game without it (no `voices` in
+ * its config entry) answers 404 on both endpoints, never with another game's.
  */
 declare(strict_types=1);
 
 namespace ManorLedger\Http\Controllers;
 
 use ManorLedger\Auth\Session;
+use ManorLedger\Http\GameSelection;
 use ManorLedger\Http\Request;
 use ManorLedger\Http\Response;
 
@@ -22,11 +26,8 @@ final class VoicesController
     public const MEDIA_PREFIX = '/media/yt/';
     private const MEDIA_ROUTE = '#^/media/yt/([A-Za-z0-9_-]{11})\.jpg\z#';
 
-    public function __construct(
-        private readonly Session $session,
-        private readonly string $voicesFile,
-        private readonly string $mediaDir,
-    ) {
+    public function __construct(private readonly Session $session, private readonly GameSelection $games)
+    {
     }
 
     public function index(Request $request): Response
@@ -34,11 +35,15 @@ final class VoicesController
         if (!$this->authenticated($request)) {
             return Response::json(['error' => 'unauthorized'], 401);
         }
-        if (!is_file($this->voicesFile)) {
+        $file = $this->games->path('voices');
+        if ($file === null) {
+            return Response::json(['error' => 'not available for this game'], 404);
+        }
+        if (!is_file($file)) {
             return Response::json(['error' => 'voices not built yet'], 503)->withHeader('Retry-After', '3600');
         }
 
-        return Response::file($this->voicesFile, 'application/json; charset=UTF-8', $request)
+        return Response::file($file, 'application/json; charset=UTF-8', $request)
             ->withHeader('Cache-Control', 'no-store');
     }
 
@@ -52,7 +57,11 @@ final class VoicesController
         if (!$this->authenticated($request)) {
             return Response::json(['error' => 'unauthorized'], 401);
         }
-        $path = $this->mediaDir . '/' . $matches[1] . '.jpg';
+        $mediaDir = $this->games->path('voicesMedia');
+        if ($mediaDir === null) {
+            return Response::json(['error' => 'not found'], 404);
+        }
+        $path = $mediaDir . '/' . $matches[1] . '.jpg';
         if (!is_file($path)) {
             return Response::json(['error' => 'not found'], 404);
         }

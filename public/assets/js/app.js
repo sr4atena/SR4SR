@@ -20,6 +20,17 @@ import * as aiSentiment from './views/voci.js';
 const views = { valore, crescita, monetizzazione, salute, ads, 'ai-sentiment': aiSentiment };
 const main = document.getElementById('main');
 
+// The server leaves out the tabs the selected game lacks (body[data-views-off]);
+// an old link or bookmark to one of them gets a notice, never another game's view.
+for (const name of (document.body.dataset.viewsOff || '').split(' ').filter(Boolean)) {
+  if (!views[name]) continue;
+  const title = views[name].title;
+  views[name] = {
+    title,
+    render() { showStatus('Non disponibile', `${title} non è disponibile per questo gioco.`); },
+  };
+}
+
 function showStatus(title, text, { retry = false } = {}) {
   const box = el('div', 'status');
   box.setAttribute('role', 'status');

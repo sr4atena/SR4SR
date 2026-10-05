@@ -5,6 +5,8 @@
 #   deploy/install.sh                 # code + config + services
 #   deploy/install.sh --with-data     # also push data/history.json + snapshots (first deploy)
 #   deploy/install.sh --api-key FILE  # also install the Roblox key (first deploy)
+#   deploy/install.sh --api-key FILE --game colorblind
+#                                     # the key of another game (config/app.php `games`)
 #
 # The host runs other services that were there first. This script touches none
 # of them: no firewall rule, no unit it did not install itself, nothing on ports
@@ -24,15 +26,28 @@ HOST="${MANOR_HOST:-manor.handgivers.it}"
 APP_DIR=/opt/manor-ledger
 DATA_DIR=/var/lib/manor-ledger
 
-WITH_DATA=0; API_KEY_FILE=""
+WITH_DATA=0; API_KEY_FILE=""; GAME=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --with-data) WITH_DATA=1 ;;
     --api-key) API_KEY_FILE="$2"; shift ;;
+    --game) GAME="${2:-}"; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
 done
+# Each game reads its key from its own file, all in /etc/manor-ledger: the
+# default game keeps the original name, any other gets a suffix, and the
+# refresh unit passes each path to the job (MANOR_API_KEY_FILE_<SLUG>).
+# The slug travels into a privileged shell, so it is checked here, with the
+# same rule the application applies to slugs.
+KEY_NAME=api-key
+if [ -n "$GAME" ]; then
+  [ -n "$API_KEY_FILE" ] || { echo "--game only goes with --api-key" >&2; exit 2; }
+  [[ "$GAME" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || { echo "invalid game slug: $GAME" >&2; exit 2; }
+  grep -Eq "^    '$GAME' => \[" config/app.php || { echo "game $GAME is not in config/app.php" >&2; exit 2; }
+  [ "$GAME" = locust ] || KEY_NAME="api-key-$GAME"
+fi
 
 SSH=(ssh -i "$KEY" -o BatchMode=yes "$VPS")
 RSYNC_SSH="ssh -i $KEY -o BatchMode=yes"
@@ -58,7 +73,7 @@ rsync -az --delete --no-links -e "$RSYNC_SSH" \
   ./ "$VPS:$STAGE/code/"
 
 if [ -n "$API_KEY_FILE" ]; then
-  echo "→ uploading Roblox API key"
+  echo "→ uploading Roblox API key (${GAME:-locust} → /etc/manor-ledger/$KEY_NAME)"
   rsync -az --chmod=600 --no-links -e "$RSYNC_SSH" "$API_KEY_FILE" "$VPS:$STAGE/api-key"
 fi
 if [ "$WITH_DATA" = 1 ]; then
@@ -67,7 +82,7 @@ if [ "$WITH_DATA" = 1 ]; then
 fi
 
 echo "→ installing on the VPS"
-"${SSH[@]}" "sudo HOST='$HOST' APP_DIR='$APP_DIR' DATA_DIR='$DATA_DIR' STAGE='$STAGE' bash -s" <<'REMOTE'
+"${SSH[@]}" "sudo HOST='$HOST' APP_DIR='$APP_DIR' DATA_DIR='$DATA_DIR' STAGE='$STAGE' KEY_NAME='$KEY_NAME' bash -s" <<'REMOTE'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -108,9 +123,33 @@ rsync -a --delete --chown=root:root "$STAGE/code/" "$APP_DIR/"
 find "$APP_DIR" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 chmod 755 "$APP_DIR"/bin/*
 
+# 3b. One data directory per additional game, same policy as the main one
+# (job owns, web group reads, setgid). The default game is the one whose data
+# dir is the root itself; every other slug in config/app.php gets
+# $DATA_DIR/games/<slug>. Nothing is moved and nothing is ever removed.
+install -d -m 2750 -o manor-fetch -g manor "$DATA_DIR/games"
+chown manor-fetch:manor "$DATA_DIR/games"
+chmod 2750 "$DATA_DIR/games"
+# Assigned first so that set -e stops the install if the config does not load.
+game_slugs=$(MANOR_DATA_DIR="$DATA_DIR" php -r '
+  $c = require $argv[1];
+  foreach ($c["games"] ?? [] as $slug => $game) {
+      if (($game["paths"]["data"] ?? "") !== $c["paths"]["data"]) { echo $slug, "\n"; }
+  }' "$APP_DIR/config/app.php")
+for slug in $game_slugs; do
+  [[ "$slug" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || { echo "skipping invalid game slug: $slug" >&2; continue; }
+  dir="$DATA_DIR/games/$slug"
+  install -d -m 2750 -o manor-fetch -g manor "$dir" "$dir"/{cache,snapshots}
+  chown manor-fetch:manor "$dir" "$dir"/{cache,snapshots}
+  chmod 2750 "$dir" "$dir"/{cache,snapshots}
+done
+
 # 4. Secrets and data (only when uploaded).
+[[ "$KEY_NAME" =~ ^api-key(-[a-z0-9][a-z0-9-]{0,31})?$ ]] || { echo "unexpected key name: $KEY_NAME" >&2; exit 1; }
 if [ -f "$STAGE/api-key" ]; then
-  install -m 640 -o root -g manor "$STAGE/api-key" /etc/manor-ledger/api-key
+  # Only the refresh job (manor-fetch) reads the key: the web pool (manor) can
+  # list the directory but never open the file.
+  install -m 640 -o root -g manor-fetch "$STAGE/api-key" "/etc/manor-ledger/$KEY_NAME"
   shred -u "$STAGE/api-key"
 fi
 if [ -d "$STAGE/data" ]; then

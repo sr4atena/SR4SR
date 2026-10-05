@@ -3,13 +3,17 @@
 /**
  * Refresh the raw Roblox caches, the history and the daily snapshot.
  *
- *   bin/refresh                       fetch everything now
+ *   bin/refresh                       fetch everything now (default game)
+ *   bin/refresh --game=colorblind     one game, by its slug in config/app.php `games`
+ *   bin/refresh --all                 every game in turn, the default first
  *   bin/refresh --if-older-than=8     only when the metrics cache is older than 8 h (cron)
  *   bin/refresh --only=DailyActiveUsers,DailyRevenue|Platform
  *   bin/refresh --dry-run             show the plan, send nothing
  *
- * Exit codes: 0 ok (or nothing to do), 1 some rows failed or a fatal error,
- * 2 bad usage. A non-blocking lock on data/refresh.lock keeps two crons apart.
+ * Exit codes: 0 ok (or nothing to do), 1 some rows failed or a fatal error
+ * (with --all: in any game; the others still run), 2 bad usage. A
+ * non-blocking lock in each game's data directory keeps two crons of the same
+ * game apart; different games do not wait for each other.
  */
 declare(strict_types=1);
 
@@ -20,6 +24,8 @@ use ManorLedger\Roblox\Refresher;
 use ManorLedger\Storage\History;
 use ManorLedger\Storage\JsonStore;
 use ManorLedger\Storage\Snapshots;
+use ManorLedger\Support\GameOption;
+use ManorLedger\Support\Games;
 
 if (PHP_SAPI !== 'cli') {
     fwrite(STDERR, "Command line only.\n");
@@ -30,14 +36,22 @@ require dirname(__DIR__) . '/src/autoload.php';
 $config = require dirname(__DIR__) . '/config/app.php';
 
 $usage = <<<TXT
-Usage: bin/refresh [--if-older-than=HOURS] [--only=Metric1,Metric2|Dimension] [--dry-run] [--help]
+Usage: bin/refresh [--game=SLUG | --all] [--if-older-than=HOURS] [--only=Metric1,Metric2|Dimension] [--dry-run] [--help]
 
 TXT;
+
+try {
+    $games  = new Games($config);
+    $option = GameOption::parse(array_slice($argv, 1), $games);
+} catch (InvalidArgumentException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n" . $usage);
+    exit(2);
+}
 
 $ifOlderThan = null;
 $only        = [];
 $dryRun      = false;
-foreach (array_slice($argv, 1) as $arg) {
+foreach ($option['rest'] as $arg) {
     if ($arg === '--help' || $arg === '-h') {
         fwrite(STDOUT, $usage);
         exit(0);
@@ -54,74 +68,106 @@ foreach (array_slice($argv, 1) as $arg) {
     }
 }
 
-$log = static function (string $line): void {
-    fwrite(STDERR, $line . "\n");
+$several = count($option['games']) > 1;
+$stamp = static fn (): string => '[' . gmdate('Y-m-d H:i:s') . 'Z]';
+
+/** One game, start to finish; the exit code it would have had on its own. */
+$refreshGame = static function (string $slug) use ($games, $several, $stamp, $ifOlderThan, $only, $dryRun): int {
+    // With --all every line names its game: the journal interleaves nothing,
+    // but a failure must say whose it was.
+    $log = static function (string $line) use ($slug, $several): void {
+        fwrite(STDERR, ($several ? "[$slug] " : '') . $line . "\n");
+    };
+
+    try {
+        $gameConfig = $games->configFor($slug);
+    } catch (Throwable $e) {
+        $log($stamp() . ' ERROR: ' . $e->getMessage());
+        return 1;
+    }
+    $paths = $gameConfig['paths'];
+    foreach ([$paths['data'], $paths['cache'], $paths['snapshots']] as $dir) {
+        if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) {
+            $log("Cannot create directory $dir");
+            return 1;
+        }
+    }
+
+    // Never two refreshes of the same game at once: they would write the same
+    // files. The lock lives in the game's own directory (the default game's is
+    // still data/refresh.lock), so games do not block each other; the shared
+    // rate-limit window is RateBudget's job. Released when the process exits.
+    $lockPath = $paths['data'] . '/refresh.lock';
+    $lock = fopen($lockPath, 'c');
+    if ($lock === false) {
+        $log("Cannot open lock file $lockPath");
+        return 1;
+    }
+    chmod($lockPath, 0600);
+    if (!flock($lock, LOCK_EX | LOCK_NB)) {
+        $log($stamp() . ' Another refresh is already running: nothing to do.');
+        fclose($lock);
+        return 0;
+    }
+
+    try {
+        $catalog = MetricCatalog::load($paths['metrics'], $paths['dimensions']);
+        $roblox  = $gameConfig['roblox'];
+        $budget  = new RateBudget(
+            (string)($roblox['budgetFile'] ?? $paths['cache'] . '/.budget.json'),
+            true,
+            (int)$roblox['windowLimit'],
+            (int)$roblox['windowSecs'],
+            (int)$roblox['reserve'],
+        );
+        // The game entry decides the universe; metrics.json carries the default
+        // game's id and must never stand in for another game's.
+        $universeId = (int)$gameConfig['app']['universeId'];
+        $clientFactory = static fn (string $apiKey): AnalyticsClient => new AnalyticsClient(
+            (string)$roblox['baseUrl'],
+            $universeId,
+            $apiKey,
+            $budget,
+            [
+                'concurrency' => (int)$roblox['concurrency'],
+                'maxTries'    => (int)$roblox['maxTries'],
+                'maxPolls'    => (int)$roblox['maxPolls'],
+                'pollWait'    => (float)$roblox['pollWait'],
+                'deadline'    => (int)$roblox['deadline'],
+                'windowSecs'  => (int)$roblox['windowSecs'],
+            ],
+        );
+
+        $refresher = new Refresher(
+            $gameConfig,
+            $catalog,
+            $clientFactory,
+            new JsonStore($paths['cache'] . '/metrics.json'),
+            new JsonStore($paths['cache'] . '/dimensions.json'),
+            new History($paths['history'], $catalog->unitOf(...)),
+            new Snapshots($paths['snapshots']),
+            $log,
+        );
+        $summary = $refresher->run($ifOlderThan, $only, $dryRun);
+        return $summary['failed'] > 0 ? 1 : 0;
+    } catch (Throwable $e) {
+        $log($stamp() . ' ERROR: ' . $e->getMessage());
+        return 1;
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
 };
 
-$paths = $config['paths'];
-foreach ([$paths['data'], $paths['cache'], $paths['snapshots']] as $dir) {
-    if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) {
-        $log("Cannot create directory $dir");
-        exit(1);
+// Sequential on purpose: the games share the owner's rate-limit window, and
+// one game's failure must not stop the next one from being refreshed.
+$failed = [];
+foreach ($option['games'] as $slug) {
+    if ($refreshGame($slug) !== 0) {
+        $failed[] = $slug;
     }
 }
-
-// Never two refreshes at once: they would share one rate-limit window and
-// both fail. The lock is released automatically when the process exits.
-$lockPath = $paths['data'] . '/refresh.lock';
-$lock = fopen($lockPath, 'c');
-if ($lock === false) {
-    $log("Cannot open lock file $lockPath");
-    exit(1);
+if ($several && $failed !== []) {
+    fwrite(STDERR, $stamp() . ' Refresh failed for: ' . implode(', ', $failed) . "\n");
 }
-chmod($lockPath, 0600);
-if (!flock($lock, LOCK_EX | LOCK_NB)) {
-    $log('[' . gmdate('Y-m-d H:i:s') . 'Z] Another refresh is already running: nothing to do.');
-    exit(0);
-}
-
-try {
-    $catalog = MetricCatalog::load($paths['metrics'], $paths['dimensions']);
-    $roblox  = $config['roblox'];
-    $budget  = new RateBudget(
-        $paths['cache'] . '/.budget.json',
-        true,
-        (int)$roblox['windowLimit'],
-        (int)$roblox['windowSecs'],
-        (int)$roblox['reserve'],
-    );
-    $universeId = (int)($config['app']['universeId'] ?? 0) ?: $catalog->universeId();
-    $clientFactory = static fn (string $apiKey): AnalyticsClient => new AnalyticsClient(
-        (string)$roblox['baseUrl'],
-        $universeId,
-        $apiKey,
-        $budget,
-        [
-            'concurrency' => (int)$roblox['concurrency'],
-            'maxTries'    => (int)$roblox['maxTries'],
-            'maxPolls'    => (int)$roblox['maxPolls'],
-            'pollWait'    => (float)$roblox['pollWait'],
-            'deadline'    => (int)$roblox['deadline'],
-            'windowSecs'  => (int)$roblox['windowSecs'],
-        ],
-    );
-
-    $refresher = new Refresher(
-        $config,
-        $catalog,
-        $clientFactory,
-        new JsonStore($paths['cache'] . '/metrics.json'),
-        new JsonStore($paths['cache'] . '/dimensions.json'),
-        new History($paths['history'], $catalog->unitOf(...)),
-        new Snapshots($paths['snapshots']),
-        $log,
-    );
-    $summary = $refresher->run($ifOlderThan, $only, $dryRun);
-    exit($summary['failed'] > 0 ? 1 : 0);
-} catch (Throwable $e) {
-    $log('[' . gmdate('Y-m-d H:i:s') . 'Z] ERROR: ' . $e->getMessage());
-    exit(1);
-} finally {
-    flock($lock, LOCK_UN);
-    fclose($lock);
-}
+exit($failed === [] ? 0 : 1);

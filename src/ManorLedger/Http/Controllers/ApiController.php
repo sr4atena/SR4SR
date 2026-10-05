@@ -6,19 +6,21 @@
  * streams the file bin/build produced, so a page load costs one authorised
  * read and a slow or rate-limited API can only ever make the data old, not the
  * site unavailable. A missing file is a 503 with Retry-After, not an empty
- * dashboard.
+ * dashboard. The file is the session's game's (GameSelection): a game that has
+ * not been built yet answers like a first deploy, never with another game's.
  */
 declare(strict_types=1);
 
 namespace ManorLedger\Http\Controllers;
 
 use ManorLedger\Auth\Session;
+use ManorLedger\Http\GameSelection;
 use ManorLedger\Http\Request;
 use ManorLedger\Http\Response;
 
 final class ApiController
 {
-    public function __construct(private readonly Session $session, private readonly string $dashboardFile)
+    public function __construct(private readonly Session $session, private readonly GameSelection $games)
     {
     }
 
@@ -27,11 +29,12 @@ final class ApiController
         if (!$this->session->resume($request) || $this->session->user() === null) {
             return Response::json(['error' => 'unauthorized'], 401);
         }
-        if (!is_file($this->dashboardFile)) {
+        $file = $this->games->path('dashboard');
+        if ($file === null || !is_file($file)) {
             return Response::json(['error' => 'dashboard not built yet'], 503)
                 ->withHeader('Retry-After', '300');
         }
-        return Response::file($this->dashboardFile, 'application/json; charset=UTF-8', $request)
+        return Response::file($file, 'application/json; charset=UTF-8', $request)
             ->withHeader('Cache-Control', 'no-store');
     }
 }

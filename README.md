@@ -190,6 +190,24 @@ bin/serve            # http://127.0.0.1:8099
 
 The Open Cloud key needs only the **Analytics: read** scope for the universe.
 
+### More than one game
+
+The games are the `games` map in `config/app.php`, keyed by slug: `locust`
+(the default, data at the root of `data/`) and `colorblind` (data under
+`data/games/colorblind/`, key in `data/games/colorblind/api-key` or
+`MANOR_API_KEY_FILE_COLORBLIND`). Each entry carries its universe id, its
+royalty share and whether it has the Ads and AI Sentiment views. The scripts
+take `--game=<slug>` (default: the default game) or `--all`:
+
+```bash
+php bin/refresh --game=colorblind && php bin/build --game=colorblind
+php bin/refresh --all && php bin/build --all     # in turn; one failure does not stop the rest
+```
+
+With two or more games the header shows a selector (`/?game=<slug>`, kept in
+the session; anything that is not a configured slug means the default game).
+To add one, add its entry and see [docs/DEPLOY.md](docs/DEPLOY.md#games).
+
 ## Deploy
 
 Production runs on a 1 GB Oracle Cloud Always Free VM shared with other
@@ -198,6 +216,7 @@ only, no inbound port is opened, TLS terminates at the Cloudflare edge.
 
 ```bash
 deploy/install.sh --api-key /path/to/key --with-data   # first time
+deploy/install.sh --api-key /path/to/key --game colorblind   # another game's key
 deploy/install.sh                                      # updates
 ```
 

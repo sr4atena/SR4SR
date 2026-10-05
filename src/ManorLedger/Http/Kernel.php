@@ -24,6 +24,7 @@ use ManorLedger\Http\Controllers\LoginController;
 use ManorLedger\Http\Controllers\VoicesController;
 use ManorLedger\Support\Clock;
 use ManorLedger\Support\Config;
+use ManorLedger\Support\Games;
 use ManorLedger\Support\SystemClock;
 use Throwable;
 
@@ -112,10 +113,13 @@ final class Kernel
         $audit = new AuditLog($this->config->string('paths.authLog'), $this->clock);
         $auth = new Authenticator($users, new PasswordHasher(), $throttle, $session, $audit, new Totp($this->clock), $this->clock);
 
+        // Built before any route runs, so a mistyped game path fails every request alike.
+        $selection = new GameSelection($session, Games::fromConfig($this->config));
+
         $login = new LoginController($auth, $session, $csrf, $view, $appName, $gameName);
-        $dashboard = new DashboardController($session, $view, $appName, $gameName);
-        $api = new ApiController($session, $this->config->string('paths.dashboard'));
-        $voices = new VoicesController($session, $this->config->string('paths.voices'), $this->config->string('paths.voicesMedia'));
+        $dashboard = new DashboardController($session, $view, $appName, $selection);
+        $api = new ApiController($session, $selection);
+        $voices = new VoicesController($session, $selection);
 
         $router = new Router();
         $router->get('/', $dashboard->index(...));
