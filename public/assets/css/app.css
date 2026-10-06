@@ -85,24 +85,26 @@ a { color: inherit; }
   background: rgba(11, 15, 23, 0.92); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; text-decoration: none; }
+/* The brand keeps its width; when the bar runs short the freshness chip gives way instead. */
+.brand { display: flex; flex: none; align-items: center; gap: var(--sp-3); min-width: 0; text-decoration: none; }
 .brand-mark { width: 30px; height: 30px; flex: none; }
 .brand-text { display: flex; flex-direction: column; min-width: 0; }
-.brand-name { font-size: 17px; font-weight: 650; letter-spacing: 0.01em; line-height: 1.1; }
+.brand-name { font-size: 17px; font-weight: 650; letter-spacing: 0.01em; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand-sub {
   font-size: 11px; color: var(--text-muted); font-variant: small-caps; letter-spacing: 0.06em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .brand-sub b { color: var(--text-soft); font-weight: 600; }
-.topbar-right { display: flex; align-items: center; gap: var(--sp-3); }
+.topbar-right { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 /* Game selector: plain links (the choice is a GET the server keeps in the session). */
-.game-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.game-switch { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
 .game-switch a { font-size: 12px; color: var(--text-muted); text-decoration: none; padding: 4px 10px; white-space: nowrap; }
 .game-switch a:hover { color: var(--text); background: var(--surface-2); }
 .game-switch a[aria-current="page"] { color: var(--accent-ink); background: var(--accent); font-weight: 600; }
 .chip-fresh {
   font-size: 12px; color: var(--text-soft); padding: 4px 10px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--surface); white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
 .chip-fresh::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--good); margin-right: 7px; vertical-align: 1px; }
 .user { position: relative; }
@@ -291,6 +293,13 @@ body.drawer-open { overflow: hidden; }
 @media (max-width: 720px) {
   :root { --toolbar-h: 44px; }
   .game-switch a { font-size: 11px; padding: 3px 8px; }
+  /* With two games the selector gets a row of its own: on one row it overran the brand. */
+  body.multi-game { --topbar-h: 96px; }
+  .multi-game .topbar { flex-wrap: wrap; align-content: center; row-gap: var(--sp-2); }
+  .multi-game .brand { flex: 1 1 0; }
+  .multi-game .topbar-right { display: contents; }
+  .multi-game .game-switch { order: 1; flex: 1 1 100%; }
+  .multi-game .game-switch a { flex: 1 1 0; text-align: center; padding: 6px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
   .topbar { padding: 0 var(--sp-4); }
   .chip-fresh { font-size: 11px; padding: 3px 8px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
   .toolbar { padding: var(--sp-2) var(--sp-4); justify-content: flex-end; }

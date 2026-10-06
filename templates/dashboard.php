@@ -32,7 +32,7 @@ $on = static fn (string $view): bool => !in_array($view, $viewsOff, true);
 <link rel="icon" type="image/svg+xml" href="<?= e($asset('img/favicon.svg')) ?>">
 <link rel="stylesheet" href="<?= e($asset('css/app.css')) ?>">
 </head>
-<body data-game="<?= e($gameName) ?>" data-views-off="<?= e(implode(' ', $viewsOff)) ?>">
+<body<?= count($games) > 1 ? ' class="multi-game"' : '' ?> data-game="<?= e($gameName) ?>" data-views-off="<?= e(implode(' ', $viewsOff)) ?>">
 <a class="skip" href="#main">Vai al contenuto</a>
 
 <header class="topbar">
