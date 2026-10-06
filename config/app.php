@@ -129,6 +129,10 @@ return [
         // The tail is mostly shorts and memes, thin to summarise, and must not
         // outvote the substantial videos (see config/prompts/voices-synthesis.md).
         'topN'    => 15,
+        // Shorts filled half of the list with a few seconds of jump scare and
+        // nothing to summarise: the most watched are videos of 4 minutes and
+        // up, the same floor as the archive behind the recent list.
+        'topMinSeconds' => 240,
         // The game's Roblox place id (public, it is in the game's URL). A video
         // whose description links another game as well is shown but kept out
         // of the synthesis.

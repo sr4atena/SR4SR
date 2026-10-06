@@ -51,9 +51,11 @@ final class YouTubeClient
      * @param  list<string> $extraIds candidates found elsewhere (ArchiveSource): they skip the
      *                                title filter, which only screens search noise, but not the
      *                                other-platform exclusion
+     * @param  int          $minSeconds shorter videos are left out (shorts: a few seconds of a
+     *                                jump scare, nothing to summarise); unknown length is kept
      * @return array{videos: list<array<string, mixed>>, stats: array{candidates: int, excludedNonRoblox: int, fromArchive: int}}
      */
-    public function topVideos(array $queries = self::DEFAULT_QUERIES, int $limit = 10, int $pagesPerQuery = 2, array $extraIds = []): array
+    public function topVideos(array $queries = self::DEFAULT_QUERIES, int $limit = 10, int $pagesPerQuery = 2, array $extraIds = [], int $minSeconds = 0): array
     {
         $ids = [];
         $tokens = array_fill_keys($queries, null);
@@ -95,6 +97,9 @@ final class YouTubeClient
         $kept = [];
         $excluded = 0;
         foreach ($candidates as $video) {
+            if (($video['seconds'] ?? PHP_INT_MAX) < $minSeconds) {
+                continue;
+            }
             if (self::isOtherPlatform($video)) {
                 $excluded++;
                 continue;
@@ -150,7 +155,7 @@ final class YouTubeClient
     }
 
     /**
-     * Statistics and full snippets for a set of ids (50 per call, 1 unit each).
+     * Statistics, length and full snippets for a set of ids (50 per call, 1 unit each).
      *
      * @param  list<string> $ids
      * @return list<array<string, mixed>>
@@ -162,7 +167,7 @@ final class YouTubeClient
         }
         $requests = [];
         foreach (array_chunk($ids, 50) as $chunk) {
-            $requests[] = $this->request('videos', ['part' => 'snippet,statistics', 'id' => implode(',', $chunk), 'maxResults' => '50']);
+            $requests[] = $this->request('videos', ['part' => 'snippet,statistics,contentDetails', 'id' => implode(',', $chunk), 'maxResults' => '50']);
         }
         $videos = [];
         foreach (($this->transport)($requests) as $response) {
@@ -184,6 +189,7 @@ final class YouTubeClient
                     'views'        => (int)($stats['viewCount'] ?? 0),
                     'likes'        => (int)($stats['likeCount'] ?? 0),
                     'commentCount' => (int)($stats['commentCount'] ?? 0),
+                    'seconds'      => self::seconds((string)($item['contentDetails']['duration'] ?? '')),
                     'url'          => 'https://www.youtube.com/watch?v=' . $id,
                     'thumbnailUrl' => (string)($snippet['thumbnails']['medium']['url'] ?? $snippet['thumbnails']['default']['url'] ?? ''),
                     'description'  => self::unescape((string)($snippet['description'] ?? '')),
@@ -253,6 +259,17 @@ final class YouTubeClient
         }
 
         return false;
+    }
+
+    /** ISO 8601 duration ("PT4M13S") in seconds; null when YouTube gave none. */
+    public static function seconds(string $duration): ?int
+    {
+        if (preg_match('/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/', $duration, $m) !== 1 || $duration === 'P') {
+            return null;
+        }
+        $part = static fn (int $i): int => (int)($m[$i] ?? 0);
+
+        return (($part(1) * 24 + $part(2)) * 60 + $part(3)) * 60 + $part(4);
     }
 
     public static function unescape(string $text): string

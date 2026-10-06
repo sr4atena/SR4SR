@@ -59,6 +59,7 @@ final class VoicesBuilder
         $only = $options['only'] ?? [];
         $topN = (int)($options['topN'] ?? 15);
         $recentN = (int)($options['recentN'] ?? 0);
+        $topMinSeconds = (int)($options['topMinSeconds'] ?? 0);
         $previous = $this->output->read() ?? [];
         if (($options['dryRun'] ?? false) === true) {
             return $this->plan($topN + $recentN, $previous);
@@ -72,7 +73,7 @@ final class VoicesBuilder
         }
         // Twice as many as needed, in order of views: a video with nothing to
         // summarise gives its place to the next most watched.
-        $found = $this->youtube->topVideos($this->queries, $topN * 2, 2, $extra['ids']);
+        $found = $this->youtube->topVideos($this->queries, $topN * 2, 2, $extra['ids'], $topMinSeconds);
         $top = [];
         $this->log(sprintf('%d candidates, %d excluded as non-Roblox, %d kept (%d found only through the archive)',
             $found['stats']['candidates'], $found['stats']['excludedNonRoblox'], count($top), $found['stats']['fromArchive'] ?? 0));

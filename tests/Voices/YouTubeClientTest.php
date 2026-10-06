@@ -132,4 +132,33 @@ final class YouTubeClientTest extends TestCase
             self::assertStringNotContainsString('SECRET-KEY', $e->getMessage());
         }
     }
+
+    public function testShortsAreLeftOutOfTheMostWatchedWhenAMinimumLengthIsSet(): void
+    {
+        $search = json_encode(['items' => [
+            ['id' => ['videoId' => 'SSSSSSSSSSS'], 'snippet' => ['title' => "The Locust's Manor jump scare #shorts"]],
+            ['id' => ['videoId' => 'LLLLLLLLLLL'], 'snippet' => ['title' => "The Locust's Manor full playthrough"]],
+            ['id' => ['videoId' => 'UUUUUUUUUUU'], 'snippet' => ['title' => "The Locust's Manor, length unknown"]],
+        ]]);
+        $video = static fn (string $id, int $views, ?string $duration): array => ['id' => $id,
+            'snippet' => ['title' => "The Locust's Manor", 'channelTitle' => 'C', 'description' => ''],
+            'statistics' => ['viewCount' => (string)$views]] + ($duration === null ? [] : ['contentDetails' => ['duration' => $duration]]);
+        $videos = json_encode(['items' => [$video('SSSSSSSSSSS', 90000, 'PT14S'), $video('LLLLLLLLLLL', 5000, 'PT12M3S'),
+                                           $video('UUUUUUUUUUU', 100, null)]]);
+        $client = new YouTubeClient('K', $this->transport([[$search], [$videos]]));
+
+        $result = $client->topVideos(["The Locust's Manor"], 10, 1, [], 240);
+
+        self::assertStringContainsString('contentDetails', $this->sent[1]['url']);
+        self::assertSame(['LLLLLLLLLLL', 'UUUUUUUUUUU'], array_column($result['videos'], 'id'));
+        self::assertSame(723, $result['videos'][0]['seconds']);
+    }
+
+    public function testDurationsAreReadInSeconds(): void
+    {
+        self::assertSame(253, YouTubeClient::seconds('PT4M13S'));
+        self::assertSame(14, YouTubeClient::seconds('PT14S'));
+        self::assertSame(3723, YouTubeClient::seconds('PT1H2M3S'));
+        self::assertNull(YouTubeClient::seconds(''));
+    }
 }
