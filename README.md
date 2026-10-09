@@ -193,7 +193,8 @@ The Open Cloud key needs only the **Analytics: read** scope for the universe.
 ### More than one game
 
 The games are the `games` map in `config/app.php`, keyed by slug: `locust`
-(the default, data at the root of `data/`) and `colorblind` (data under
+(the default, data at the root of `data/`) and `colorblind` (THE SEWER,
+formerly COLORBLIND: the slug kept the old name; data under
 `data/games/colorblind/`, key in `data/games/colorblind/api-key` or
 `MANOR_API_KEY_FILE_COLORBLIND`). Each entry carries its universe id, its
 royalty share and whether it has the Ads and AI Sentiment views. The scripts

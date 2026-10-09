@@ -40,8 +40,10 @@ $games = [
             'voicesMedia' => $dataDir . '/media/yt',
         ],
     ],
+    // Renamed on Roblox from COLORBLIND to THE SEWER (same universe): the slug
+    // keeps the old name so the data directory and the key file did not move.
     'colorblind' => [
-        'name'         => 'COLORBLIND',
+        'name'         => 'THE SEWER',
         'universeId'   => (int)$env('MANOR_UNIVERSE_ID_COLORBLIND', 10766214469),
         'royaltyShare' => 0.0,     // not a licensed game: no royalty withheld
         'voices'       => false,

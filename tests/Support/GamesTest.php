@@ -54,7 +54,7 @@ final class GamesTest extends TestCase
         $games = new Games(self::realConfig());
         $cb = $games->configFor('colorblind');
         $dir = self::DATA . '/games/colorblind';
-        self::assertSame('COLORBLIND', $cb['app']['game']);
+        self::assertSame('THE SEWER', $cb['app']['game']);
         self::assertSame(10766214469, $cb['app']['universeId']);
         self::assertSame(0.0, $cb['economics']['royaltyShare']);
         self::assertSame($dir, $cb['paths']['data']);
